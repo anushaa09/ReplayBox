@@ -1,0 +1,22 @@
+require('dotenv').config();
+const express = require('express');
+const helmet = require('helmet');
+const pinoHttp = require('pino-http');
+const path = require('node:path');
+const api = require('./routes/api');
+const app = express();
+app.disable('x-powered-by');
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(pinoHttp({ redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]'] }));
+app.use(express.json({ limit: process.env.MAX_CAPTURE_BYTES || '100kb' }));
+app.use(express.static(path.join(__dirname, '..', 'public')));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'replaybox-api' }));
+app.use('/api', api);
+app.use((req, res) => res.status(404).json({ error: 'Route not found.' }));
+app.use((err, req, res, next) => {
+  req.log?.error({ err }, 'Request failed');
+  if (res.headersSent) return next(err);
+  const status = err.type === 'entity.too.large' ? 413 : 500;
+  res.status(status).json({ error: status === 413 ? 'Request body too large.' : 'Internal server error.' });
+});
+module.exports = app;
